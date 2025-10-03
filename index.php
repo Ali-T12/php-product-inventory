@@ -158,8 +158,7 @@ function old($key, $default = '')
 </head>
 
 <body>
-    <h2 style="color:blue">Hello GitHub Test!</h2>
-
+    
     <div class="container py-4">
         <div class="row g-4">
             <div class="col-12">
@@ -207,8 +206,7 @@ function old($key, $default = '')
                                             <td><?= e($p['id']) ?></td>
                                             <td><?= e($p['name']) ?></td>
                                             <td><?= e($p['description']) ?></td>
-                                            <td class="text-end price-cell"><?= number_format((float) $p['price'], 2) ?>
-                                            </td>
+                                            <td class="text-end price-cell"><?= number_format((float) $p['price'], 2) ?></td>
                                             <td><?= e($p['category']) ?></td>
                                         </tr>
                                     <?php endforeach; ?>
