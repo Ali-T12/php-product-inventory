@@ -1,12 +1,14 @@
 <?php
+/*************************************************
+ * index.php — PHP Product Inventory (All-in-one)
+ * Parts 1–3 + Delete (Extra) + Session persistence
+ *************************************************/
 
 session_start();
 
-/* ----------------------- Part 1: Data Structure ----------------------- */
-// Categories for the dropdown
-$categories = ["Electronics", "Books", "Groceries", "Clothing", "Other"];
-
-// Initialize multi-dimensional products array in session (persist during session)
+/* =================================================
+   Part 1: Data Structure & Initialization
+   ================================================= */
 if (!isset($_SESSION['products'])) {
     $_SESSION['products'] = [
         [
@@ -14,35 +16,92 @@ if (!isset($_SESSION['products'])) {
             'name' => 'USB-C Cable',
             'description' => 'Fast-charging braided cable (1m).',
             'price' => 5.50,
-            'category' => 'Electronics'
+            'category' => 'Electronics',
         ],
         [
             'id' => 2,
             'name' => 'Notebook A5',
             'description' => 'Lined paper, 100 pages.',
             'price' => 2.25,
-            'category' => 'Books'
+            'category' => 'Books',
         ],
     ];
 }
 $products = $_SESSION['products'];
+$categories = ["Electronics", "Books", "Groceries", "Clothing", "Other"];
 
-/* ----------------------- Part 2: Form Handling & Validation ----------------------- */
-$errors = [];
-$submittedData = [];
-
-// Helper: sanitize scalar input
+// Helpers
 function clean($v)
 {
-    if (is_array($v))
-        return $v;
-    return trim($v ?? '');
+    return is_array($v) ? $v : trim($v ?? '');
+}
+function e($s)
+{
+    return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+}
+// repopulate helper
+$submittedData = [];
+function old($key, $default = '')
+{
+    global $submittedData;
+    return isset($submittedData[$key]) ? e($submittedData[$key]) : e($default);
 }
 
-// Handle POST (Add product)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Flash helpers
+function flash_set($key, $msg)
+{
+    $_SESSION[$key] = $msg;
+}
+function flash_get($key)
+{
+    $m = $_SESSION[$key] ?? '';
+    unset($_SESSION[$key]);
+    return $m;
+}
 
-    // 1) Check submission + collect
+// CSRF token (simple)
+if (!isset($_SESSION['csrf'])) {
+    $_SESSION['csrf'] = bin2hex(random_bytes(16));
+}
+
+/* =================================================
+   Extra (first): Delete Handler (before add/validate)
+   ================================================= */
+$errors = [];
+function product_index_by_id(array $arr, $id)
+{
+    foreach ($arr as $i => $row)
+        if ((string) $row['id'] === (string) $id)
+            return $i;
+    return -1;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    if (!hash_equals($_SESSION['csrf'], $_POST['csrf'] ?? '')) {
+        $errors['general'] = 'Invalid request.';
+    } else {
+        $idToDelete = clean($_POST['id'] ?? '');
+        if ($idToDelete === '' || !ctype_digit($idToDelete)) {
+            $errors['general'] = 'Invalid product id.';
+        } else {
+            $idx = product_index_by_id($products, (int) $idToDelete);
+            if ($idx === -1) {
+                $errors['general'] = 'Product not found.';
+            } else {
+                array_splice($products, $idx, 1);
+                $_SESSION['products'] = $products;
+                flash_set('flash_success', "Product #{$idToDelete} deleted.");
+                header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?')); // PRG
+                exit;
+            }
+        }
+    }
+}
+
+/* =================================================
+   Part 2: Form Handling & Validation (Add product)
+   ================================================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delete') {
+    // collect
     $submittedData = [
         'name' => clean($_POST['name'] ?? ''),
         'description' => clean($_POST['description'] ?? ''),
@@ -50,92 +109,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'category' => clean($_POST['category'] ?? ''),
     ];
 
-    // 2) Validate
-    // name
-    if ($submittedData['name'] === '') {
+    // validate
+    if ($submittedData['name'] === '')
         $errors['name'] = 'Name is required';
-    } elseif (mb_strlen($submittedData['name']) < 2) {
+    elseif (mb_strlen($submittedData['name']) < 2)
         $errors['name'] = 'Name must be at least 2 characters';
-    }
 
-    // description
-    if ($submittedData['description'] === '') {
+    if ($submittedData['description'] === '')
         $errors['description'] = 'Description is required';
-    } elseif (mb_strlen($submittedData['description']) < 5) {
+    elseif (mb_strlen($submittedData['description']) < 5)
         $errors['description'] = 'Description must be at least 5 characters';
-    }
 
-    // price
-    if ($submittedData['price'] === '') {
+    if ($submittedData['price'] === '')
         $errors['price'] = 'Price is required';
-    } elseif (!is_numeric($submittedData['price'])) {
+    elseif (!is_numeric($submittedData['price']))
         $errors['price'] = 'Price must be a number';
-    } elseif ((float) $submittedData['price'] <= 0) {
+    elseif ((float) $submittedData['price'] <= 0)
         $errors['price'] = 'Price must be greater than 0';
-    }
 
-    // category
-    global $categories;
-    if ($submittedData['category'] === '') {
+    if ($submittedData['category'] === '')
         $errors['category'] = 'Category is required';
-    } elseif (!in_array($submittedData['category'], $categories, true)) {
+    elseif (!in_array($submittedData['category'], $categories, true))
         $errors['category'] = 'Invalid category';
-    }
 
-    // 3) If valid -> add product, set success flash, clear $submittedData
+    // success -> add
     if (empty($errors)) {
-        // Generate unique id (max + 1)
-        $newId = 1 + max(array_column($products, 'id'));
-
-        $newProduct = [
+        $newId = $products ? (1 + max(array_column($products, 'id'))) : 1;
+        $products[] = [
             'id' => $newId,
             'name' => $submittedData['name'],
             'description' => $submittedData['description'],
             'price' => round((float) $submittedData['price'], 2),
             'category' => $submittedData['category'],
         ];
-
-        // Add to products (session store)
-        $products[] = $newProduct;
         $_SESSION['products'] = $products;
-
-        // Flash success message (disappear after refresh)
-        $_SESSION['flash_success'] = 'Product added successfully (ID: ' . $newId . ').';
-
-        // Clear form data by redirect (PRG pattern)
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?'));
+        flash_set('flash_success', "Product added successfully (ID: {$newId}).");
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?')); // PRG
         exit;
     }
 }
 
-/* Helper for safe echo */
-function e($str)
-{
-    return htmlspecialchars((string) $str, ENT_QUOTES, 'UTF-8');
-}
-
-// Helper for repopulating inputs from $submittedData (if validation failed)
-function old($key, $default = '')
-{
-    global $submittedData;
-    return isset($submittedData[$key]) ? e($submittedData[$key]) : e($default);
-}
+// Flash (for display)
+$flash_success = flash_get('flash_success');
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <title>PHP Product Inventory</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <!-- Part 0: Bootstrap CDN (CSS + JS) -->
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- CSS -->
+    <!-- Bootstrap -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
-        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <!-- JS -->
+        crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
         crossorigin="anonymous"></script>
 
     <style>
@@ -158,31 +186,35 @@ function old($key, $default = '')
 </head>
 
 <body>
-    
     <div class="container py-4">
         <div class="row g-4">
             <div class="col-12">
                 <h1 class="h3 fw-bold mb-3">PHP Product Inventory</h1>
             </div>
 
-            <!-- Messages (Part 3.1) -->
+            <!-- Alerts -->
             <div class="col-12">
-                <?php if (!empty($_SESSION['flash_success'])): ?>
+                <?php if (!empty($flash_success)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        <?= e($_SESSION['flash_success']) ?>
+                        <?= e($flash_success) ?>
                         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
-                    <?php unset($_SESSION['flash_success']); ?>
                 <?php endif; ?>
 
-                <?php if (!empty($errors)): ?>
+                <?php if (!empty($errors['general'])): ?>
+                    <div class="alert alert-danger" role="alert">
+                        <?= e($errors['general']) ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!empty($errors) && empty($errors['general'])): ?>
                     <div class="alert alert-danger" role="alert">
                         Please fix the errors below and submit again.
                     </div>
                 <?php endif; ?>
             </div>
 
-            <!-- Product Table (Part 3.2) -->
+            <!-- Product Table -->
             <div class="col-lg-7">
                 <div class="card shadow-sm">
                     <div class="card-header bg-white">
@@ -198,21 +230,33 @@ function old($key, $default = '')
                                         <th>Description</th>
                                         <th class="text-end">Price (USD)</th>
                                         <th>Category</th>
+                                        <th style="width:1%">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($products as $p): ?>
+                                    <?php if (!empty($products)): ?>
+                                        <?php foreach ($products as $p): ?>
+                                            <tr>
+                                                <td><?= e($p['id']) ?></td>
+                                                <td><?= e($p['name']) ?></td>
+                                                <td><?= e($p['description']) ?></td>
+                                                <td class="text-end price-cell"><?= number_format((float) $p['price'], 2) ?></td>
+                                                <td><?= e($p['category']) ?></td>
+                                                <td>
+                                                    <form method="post" class="d-inline"
+                                                        onsubmit="return confirm('Delete this product?');">
+                                                        <input type="hidden" name="action" value="delete">
+                                                        <input type="hidden" name="id" value="<?= e($p['id']) ?>">
+                                                        <input type="hidden" name="csrf" value="<?= e($_SESSION['csrf']) ?>">
+                                                        <button type="submit"
+                                                            class="btn btn-sm btn-outline-danger">Delete</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
                                         <tr>
-                                            <td><?= e($p['id']) ?></td>
-                                            <td><?= e($p['name']) ?></td>
-                                            <td><?= e($p['description']) ?></td>
-                                            <td class="text-end price-cell"><?= number_format((float) $p['price'], 2) ?></td>
-                                            <td><?= e($p['category']) ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                    <?php if (!$products): ?>
-                                        <tr>
-                                            <td colspan="5" class="text-center text-muted">No products yet.</td>
+                                            <td colspan="6" class="text-center text-muted">No products yet.</td>
                                         </tr>
                                     <?php endif; ?>
                                 </tbody>
@@ -225,7 +269,7 @@ function old($key, $default = '')
                 </div>
             </div>
 
-            <!-- Add Product Form (Part 3.3) -->
+            <!-- Add Product Form -->
             <div class="col-lg-5">
                 <div class="card shadow-sm">
                     <div class="card-header bg-white">
@@ -240,8 +284,7 @@ function old($key, $default = '')
                                     class="form-control <?= isset($errors['name']) ? 'is-invalid' : '' ?>"
                                     value="<?= old('name') ?>" placeholder="e.g., USB-C Cable">
                                 <?php if (isset($errors['name'])): ?>
-                                    <div class="invalid-feedback"><?= e($errors['name']) ?></div>
-                                <?php endif; ?>
+                                    <div class="invalid-feedback"><?= e($errors['name']) ?></div><?php endif; ?>
                             </div>
 
                             <!-- Description -->
@@ -251,8 +294,7 @@ function old($key, $default = '')
                                     class="form-control <?= isset($errors['description']) ? 'is-invalid' : '' ?>"
                                     placeholder="Short details..."><?= old('description') ?></textarea>
                                 <?php if (isset($errors['description'])): ?>
-                                    <div class="invalid-feedback"><?= e($errors['description']) ?></div>
-                                <?php endif; ?>
+                                    <div class="invalid-feedback"><?= e($errors['description']) ?></div><?php endif; ?>
                             </div>
 
                             <!-- Price -->
@@ -262,8 +304,7 @@ function old($key, $default = '')
                                     class="form-control <?= isset($errors['price']) ? 'is-invalid' : '' ?>"
                                     value="<?= old('price') ?>" placeholder="e.g., 9.99">
                                 <?php if (isset($errors['price'])): ?>
-                                    <div class="invalid-feedback"><?= e($errors['price']) ?></div>
-                                <?php endif; ?>
+                                    <div class="invalid-feedback"><?= e($errors['price']) ?></div><?php endif; ?>
                             </div>
 
                             <!-- Category -->
@@ -279,19 +320,17 @@ function old($key, $default = '')
                                     <?php endforeach; ?>
                                 </select>
                                 <?php if (isset($errors['category'])): ?>
-                                    <div class="invalid-feedback"><?= e($errors['category']) ?></div>
-                                <?php endif; ?>
+                                    <div class="invalid-feedback"><?= e($errors['category']) ?></div><?php endif; ?>
                             </div>
 
                             <div class="d-grid">
-                                <button type="submit" class="btn btn-primary">
-                                    Add Product
-                                </button>
+                                <button type="submit" name="action" value="add" class="btn btn-primary">Add
+                                    Product</button>
                             </div>
                         </form>
                     </div>
                     <div class="card-footer text-muted small">
-                        * Uses server-side validation with Bootstrap styles.
+                        * Server-side validation with Bootstrap styles.
                     </div>
                 </div>
             </div>
