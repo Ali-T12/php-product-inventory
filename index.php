@@ -1,9 +1,4 @@
 <?php
-/*************************************************
- * index.php — PHP Product Inventory (All-in-one)
- * Parts 1–3 + Delete (Extra) + Session persistence
- *************************************************/
-
 session_start();
 
 /* =================================================
@@ -66,7 +61,8 @@ if (!isset($_SESSION['csrf'])) {
 
 /* =================================================
    Extra (first): Delete Handler (before add/validate)
-   ================================================= */
+   ================================================= 
+   */
 $errors = [];
 function product_index_by_id(array $arr, $id)
 {
@@ -99,7 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 /* =================================================
    Part 2: Form Handling & Validation (Add product)
-   ================================================= */
+   ================================================= 
+   */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delete') {
     // collect
     $submittedData = [
